@@ -72,7 +72,8 @@ class MultiHeadAttention(nn.Module):
         )
 
     def forward(self, x):
-        b, num_tokens, d_in = x.shape
+        # x.shape: (batch_size, num_tokens, emb_dim)
+        b, num_tokens, emb_dim = x.shape
 
         keys = self.W_key(x)
         queries = self.W_query(x)
@@ -171,9 +172,10 @@ class TransformerBlock(nn.Module):
         self.drop_shortcut = nn.Dropout(cfg["drop_rate"])
 
     def forward(self, x):
+        # x.shape: (batch_size, num_tokens, emb_size)
         shortcut = x
         x = self.norm1(x)
-        x = self.att(x)   # Shape [batch_size, num_tokens, emb_size]
+        x = self.att(x)
         x = self.drop_shortcut(x)
         x = x + shortcut  # Add the original input back
 
@@ -200,23 +202,34 @@ class GPTModel(nn.Module):
         self.out_head = nn.Linear(cfg["emb_dim"], cfg["vocab_size"], bias=False)
 
     def forward(self, in_idx):
-        batch_size, seq_len = in_idx.shape
+        batch_size, num_tokens = in_idx.shape
+        # tok_embeds: (batch_size, num_tokens, emb_dim)
         tok_embeds = self.tok_emb(in_idx)
-        pos_embeds = self.pos_emb(torch.arange(seq_len, device=in_idx.device))
-        x = tok_embeds + pos_embeds  # Shape [batch_size, num_tokens, emb_size]
+        # pos_embeds: (num_tokens, emb_dim)
+        pos_embeds = self.pos_emb(torch.arange(num_tokens, device=in_idx.device))
+        # x.shape (batch_size, num_tokens, emb_size)
+        x = tok_embeds + pos_embeds
         x = self.drop_emb(x)
         x = self.trf_blocks(x)
         x = self.final_norm(x)
         logits = self.out_head(x)
         return logits
 
+def text_to_token_ids(text, tokenizer):
+    encoded = tokenizer.encode(text, allowed_special={'<|endoftext|>'})
+    encoded_tensor = torch.tensor(encoded).unsqueeze(0) # add batch dimension
+    return encoded_tensor
+
+def token_ids_to_text(token_ids, tokenizer):
+    flat = token_ids.squeeze(0) # remove batch dimension
+    return tokenizer.decode(flat.tolist())
 
 def generate_text_simple(model, idx, max_new_tokens, context_size):
     # idx is (B, T) array of indices in the current context
     for _ in range(max_new_tokens):
 
         # Crop current context if it exceeds the supported context size
-        # For example, if LLM supports only 5 tokens, and the context size is 10
+        # For example, if LLM supports only 5 tokens, and the input size is 10
         # then only the last 5 tokens are used as context
         idx_cond = idx[:, -context_size:]
 
