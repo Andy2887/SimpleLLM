@@ -79,7 +79,7 @@ class MultiHeadAttention(nn.Module):
         queries = self.W_query(x)
         values = self.W_value(x)
 
-        # split into multiple heads
+        # split embedding dimension into multiple heads
         # (b, num_tokens, num_heads, head_dim)
         keys = keys.view(b, num_tokens, self.num_heads, self.head_dim)
         queries = queries.view(b, num_tokens, self.num_heads, self.head_dim)
@@ -113,7 +113,7 @@ class MultiHeadAttention(nn.Module):
 
         # combine multiple heads together
         context_vec = context_vec.contiguous().view(b, num_tokens, self.d_out)
-        # apply projection
+        # combine information across heads via output projection
         context_vec = self.out_proj(context_vec)
         
         return context_vec

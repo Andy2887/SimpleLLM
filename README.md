@@ -10,6 +10,8 @@ A GPT-2-style language model built from scratch in PyTorch.
 | `utils.py` | Core model components: `GPTModel`, `TransformerBlock`, `MultiHeadAttention`, tokenizer utilities |
 | `gpt_download.py` | Downloads GPT-2 pretrained weights from OpenAI and loads them into my model |
 
+![Alt text](architecture.svg)
+
 ## Getting Started
 
 ### Prerequisites
