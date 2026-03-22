@@ -1,8 +1,11 @@
 from utils import *
 from gpt_download import *
 import argparse
+import os
 
-def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None):
+FINETUNED_WEIGHTS_PATH = "parameters_after_finetuning.pth"
+
+def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None, eos_id=None):
 
     for _ in range(max_new_tokens):
 
@@ -10,7 +13,7 @@ def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=No
         idx_cond = idx[:, -context_size:]
         with torch.no_grad():
             logits = model(idx_cond)
-        
+
         # We only look at the last token (the one we want)
         logits = logits[:, -1, :]
 
@@ -29,18 +32,41 @@ def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=No
         else:
             idx_next = torch.argmax(logits, dim=-1, keepdim=True)  # (batch_size, 1)
 
+        # Stop if EOS token is generated
+        if eos_id is not None and idx_next.item() == eos_id:
+            break
+
         # Append token to the sequence as the input of next round
         idx = torch.cat((idx, idx_next), dim=1)  # (batch_size, num_tokens+1)
 
     return idx
 
+def format_instruction_prompt(prompt):
+    """Wrap user prompt in Alpaca-style instruction template for finetuned model."""
+    return (
+        "Below is an instruction that describes a task. "
+        "Write a response that appropriately completes the request.\n\n"
+        f"### Instruction:\n{prompt}\n\n"
+        f"### Response:\n"
+    )
+
 
 def main(gpt_config, input_prompt, model_size, device):
 
-    settings, params = download_and_load_gpt2(model_size=model_size, models_dir="gpt2")
-
     gpt = GPTModel(gpt_config)
-    load_weights_into_gpt(gpt, params)
+
+    # Check if there are finetuned weights in the repository.
+    # If yes, we will use the finetuned parameters
+    # Otherwise, we will use the GPT-2 pretrained weights from OpenAI
+    if os.path.exists(FINETUNED_WEIGHTS_PATH):
+        print(f"Loading finetuned weights from {FINETUNED_WEIGHTS_PATH}")
+        gpt.load_state_dict(torch.load(FINETUNED_WEIGHTS_PATH, map_location=device, weights_only=True))
+        input_prompt = format_instruction_prompt(input_prompt)
+    else:
+        print("No finetuned weights found, loading OpenAI GPT-2 weights")
+        settings, params = download_and_load_gpt2(model_size=model_size, models_dir="gpt2")
+        load_weights_into_gpt(gpt, params)
+
     gpt.to(device)
     gpt.eval()
 
@@ -53,10 +79,17 @@ def main(gpt_config, input_prompt, model_size, device):
         max_new_tokens=100,
         context_size=gpt_config["context_length"],
         top_k=10,
-        temperature=1.0
+        temperature=1.0,
+        eos_id=50256
     )
 
-    print("Output text:\n", token_ids_to_text(token_ids, tokenizer))
+    output_text = token_ids_to_text(token_ids, tokenizer)
+
+    # Extract just the response when using finetuned model
+    if "### Response:" in output_text:
+        output_text = output_text.split("### Response:")[-1].strip()
+
+    print("Output text:\n", output_text)
 
 
 if __name__ == "__main__":
