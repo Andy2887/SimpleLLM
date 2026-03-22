@@ -1,4 +1,5 @@
 from utils import *
+from gpt_download import *
 
 
 GPT_CONFIG_124M = {
