@@ -52,7 +52,7 @@ def main(gpt_config, input_prompt, model_size, device):
         idx=text_to_token_ids(input_prompt, tokenizer).to(device),
         max_new_tokens=100,
         context_size=gpt_config["context_length"],
-        top_k=50,
+        top_k=10,
         temperature=1.0
     )
 
