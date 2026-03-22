@@ -2,6 +2,8 @@
 
 A GPT-2-style language model built from scratch in PyTorch.
 
+![Alt text](architecture.svg)
+
 ## Project Structure
 
 | File | Description |
@@ -9,8 +11,6 @@ A GPT-2-style language model built from scratch in PyTorch.
 | `llm.py` | Entry point — generates text with a pretrained GPT-2 model |
 | `utils.py` | Core model components: `GPTModel`, `TransformerBlock`, `MultiHeadAttention`, tokenizer utilities |
 | `gpt_download.py` | Downloads GPT-2 pretrained weights from OpenAI and loads them into my model |
-
-![Alt text](architecture.svg)
 
 ## Getting Started
 
