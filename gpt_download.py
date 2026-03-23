@@ -128,7 +128,10 @@ def load_gpt2_params_from_tf_ckpt(ckpt_path, settings):
     params = {"blocks": [{} for _ in range(settings["n_layer"])]}
 
     # Iterate over each variable in the checkpoint
-    for name, _ in tf.train.list_variables(ckpt_path):
+    variables = tf.train.list_variables(ckpt_path)
+    for i, (name, _) in enumerate(variables):
+        print(f"\rLoading TF checkpoint: {i+1}/{len(variables)}", end="", flush=True)
+
         # Load the variable and remove singleton dimensions
         variable_array = np.squeeze(tf.train.load_variable(ckpt_path, name))
 
@@ -149,6 +152,7 @@ def load_gpt2_params_from_tf_ckpt(ckpt_path, settings):
         last_key = variable_name_parts[-1]
         target_dict[last_key] = variable_array
 
+    print()  # newline after progress
     return params
 
 def assign(left, right):

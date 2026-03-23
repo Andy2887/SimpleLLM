@@ -3,7 +3,12 @@ from gpt_download import *
 import argparse
 import os
 
-FINETUNED_WEIGHTS_PATH = "parameters_after_finetuning.pth"
+MODEL_CONFIGS = {
+    "124M": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
+    "355M": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
+    "774M": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
+    "1558M": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
+}
 
 def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None, eos_id=None):
 
@@ -55,17 +60,20 @@ def main(gpt_config, input_prompt, model_size, device):
 
     gpt = GPTModel(gpt_config)
 
+    finetuned_path = f"finetuned_weights/{model_size}_finetuned_weights.pth"
+
     # Check if there are finetuned weights in the repository.
     # If yes, we will use the finetuned parameters
     # Otherwise, we will use the GPT-2 pretrained weights from OpenAI
-    if os.path.exists(FINETUNED_WEIGHTS_PATH):
-        print(f"Loading finetuned weights from {FINETUNED_WEIGHTS_PATH}")
-        gpt.load_state_dict(torch.load(FINETUNED_WEIGHTS_PATH, map_location=device, weights_only=True))
+    if os.path.exists(finetuned_path):
+        print(f"Loading finetuned weights from {finetuned_path}")
+        gpt.load_state_dict(torch.load(finetuned_path, map_location=device, weights_only=True))
         input_prompt = format_instruction_prompt(input_prompt)
     else:
-        print("No finetuned weights found, loading OpenAI GPT-2 weights")
+        print(f"No finetuned weights found for {model_size}, loading OpenAI GPT-2 weights")
         settings, params = download_and_load_gpt2(model_size=model_size, models_dir="gpt2")
         load_weights_into_gpt(gpt, params)
+        del settings, params
 
     gpt.to(device)
     gpt.eval()
@@ -105,38 +113,29 @@ if __name__ == "__main__":
         default="cpu",
         help="Device for running inference, e.g., cpu, cuda, mps, or auto."
     )
+    parser.add_argument(
+        "--parameter",
+        default="774M",
+        choices=["124M", "355M", "774M", "1558M"],
+        help="Model size: 124M (small), 355M (medium), 774M (large), 1558M (xl)."
+    )
 
     args = parser.parse_args()
 
-    # torch.manual_seed(123)
-
-    # CHOOSE_MODEL = "gpt2-small (124M)"
     INPUT_PROMPT = args.prompt
     DEVICE = torch.device(args.device)
+    MODEL_SIZE = args.parameter
 
     print("PyTorch:", torch.__version__)
     print("Device:", DEVICE)
-
+    print("Model size:", MODEL_SIZE)
 
     CONFIG = {
         "vocab_size": 50257,
         "context_length": 1024,
         "drop_rate": 0.0,
         "qkv_bias": True,
-        "emb_dim": 768,
-        "n_layers": 12,
-        "n_heads": 12,
     }
+    CONFIG.update(MODEL_CONFIGS[MODEL_SIZE])
 
-    # model_configs = {
-    #     "gpt2-small (124M)": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
-    #     "gpt2-medium (355M)": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
-    #     "gpt2-large (774M)": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
-    #     "gpt2-xl (1558M)": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
-    # }
-
-    # model_size = CHOOSE_MODEL.split(" ")[-1].lstrip("(").rstrip(")")
-
-    # CONFIG.update(model_configs[CHOOSE_MODEL])
-
-    main(CONFIG, INPUT_PROMPT, "124M", DEVICE)
+    main(CONFIG, INPUT_PROMPT, MODEL_SIZE, DEVICE)

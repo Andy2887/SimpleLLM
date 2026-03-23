@@ -87,7 +87,7 @@ Add reasoning on top of this model.
 
 - Will need to switch parameters from 124M to 774M.
 
-In llm.py and gpt_instruction_finetuning.py, allow the user to choose the number of parameters of the model.
+- Use g6.2xlarge on-spot instance for training. Add checkpoints to "prevent interruptions".
 
 ## Acknowledgement
 

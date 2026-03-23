@@ -5,3 +5,4 @@ gpt2
 build_a_large_language_model.pdf
 build_a_reasoning_model.pdf
 parameters_after_finetuning.pth
+finetuned_weights

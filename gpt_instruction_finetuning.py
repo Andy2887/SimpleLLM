@@ -1,10 +1,18 @@
 import json
 import argparse
+import os
 import torch
 import tiktoken
 from torch.utils.data import Dataset, DataLoader
 from utils import GPTModel
 from gpt_download import download_and_load_gpt2, load_weights_into_gpt
+
+MODEL_CONFIGS = {
+    "124M": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
+    "355M": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
+    "774M": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
+    "1558M": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
+}
 
 
 def format_instruction(entry):
@@ -132,6 +140,8 @@ def main():
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size.")
     parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate.")
     parser.add_argument("--max_length", type=int, default=512, help="Max sequence length.")
+    parser.add_argument("--parameter", default="774M", choices=["124M", "355M", "774M", "1558M"],
+                        help="Model size: 124M (small), 355M (medium), 774M (large), 1558M (xl).")
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -160,21 +170,20 @@ def main():
         collate_fn=custom_collate_fn, drop_last=False
     )
 
+    model_size = args.parameter
     gpt_config = {
         "vocab_size": 50257,
         "context_length": 1024,
         "drop_rate": 0.0,
         "qkv_bias": True,
-        "emb_dim": 768,
-        "n_layers": 12,
-        "n_heads": 12,
     }
+    gpt_config.update(MODEL_CONFIGS[model_size])
 
-    _, params = download_and_load_gpt2(model_size="124M", models_dir="gpt2")
+    _, params = download_and_load_gpt2(model_size=model_size, models_dir="gpt2")
     model = GPTModel(gpt_config)
     load_weights_into_gpt(model, params)
     model.to(device)
-    print("Loaded pretrained GPT-2 weights")
+    print(f"Loaded pretrained GPT-2 ({model_size}) weights")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
 
@@ -182,8 +191,10 @@ def main():
     train(model, train_loader, val_loader, optimizer, device, args.epochs)
 
     # Save finetuned weights
-    torch.save(model.state_dict(), "parameters_after_finetuning.pth")
-    print("\nSaved finetuned weights to parameters_after_finetuning.pth")
+    os.makedirs("finetuned_weights", exist_ok=True)
+    save_path = f"finetuned_weights/{model_size}_finetuned_weights.pth"
+    torch.save(model.state_dict(), save_path)
+    print(f"\nSaved finetuned weights to {save_path}")
 
 
 if __name__ == "__main__":
