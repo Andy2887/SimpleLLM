@@ -83,7 +83,11 @@ python gpt_instruction_finetuning.py --epochs 3 --batch_size 4 --lr 1e-5 --max_l
 
 Add reasoning on top of this model.
 
+- Apply RL on top of my fine-tuned model using math/logic problems.
+
 - Will need to switch parameters from 124M to 774M.
+
+In llm.py and gpt_instruction_finetuning.py, allow the user to choose the number of parameters of the model.
 
 ## Acknowledgement
 
