@@ -79,6 +79,12 @@ python gpt_instruction_finetuning.py --epochs 3 --batch_size 4 --lr 1e-5 --max_l
 | Attention heads | 12 |
 | Total parameters | ~124M |
 
+## TODO
+
+Add reasoning on top of this model.
+
+- Will need to switch parameters from 124M to 774M.
+
 ## Acknowledgement
 
 My project follows Sebastian Raschka's tutorial: [LLMs-from-scratch](https://github.com/rasbt/LLMs-from-scratch).
