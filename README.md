@@ -8,8 +8,9 @@ A GPT-2-style language model built from scratch in PyTorch.
 
 | File | Description |
 |------|-------------|
-| `llm.py` | Entry point — generates text with SimpleLLM |
-| `utils.py` | Core model components: `GPTModel`, `TransformerBlock`, `MultiHeadAttention`, tokenizer utilities |
+| `start_gpt.py` | Entry point — generates text with SimpleLLM |
+| `gpt.py` | Core model components: `GPTModel`, `TransformerBlock`, `MultiHeadAttention`, data loading |
+| `utils.py` | General utilities: `generate`, `text_to_token_ids`, `token_ids_to_text`, `format_instruction_prompt` |
 | `gpt_download.py` | Downloads GPT-2 pretrained weights from OpenAI and loads them into my model |
 | `gpt_instruction_finetuning.py` | Fine-tunes the model on instruction data |
 
@@ -36,14 +37,14 @@ pip install -r requirements.txt
 
 ```bash
 # Generate text with the default prompt
-python llm.py
+python start_gpt.py
 
 # Custom prompt
-python llm.py --prompt "What is the meaning of life?"
+python start_gpt.py --prompt "What is the meaning of life?"
 
 # Use GPU (CUDA or Apple Silicon)
-python llm.py --prompt "Why should we study Computer Science?" --device cuda
-python llm.py --prompt "Why should we study Computer Science?" --device mps
+python start_gpt.py --prompt "Why should we study Computer Science?" --device cuda
+python start_gpt.py --prompt "Why should we study Computer Science?" --device mps
 ```
 
 If you want to fine-tune the model, see instructions below.

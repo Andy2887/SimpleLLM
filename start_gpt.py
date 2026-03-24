@@ -1,3 +1,4 @@
+from gpt import *
 from utils import *
 from gpt_download import *
 import argparse

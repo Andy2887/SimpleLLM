@@ -3,7 +3,7 @@ import argparse
 import torch
 import tiktoken
 from torch.utils.data import Dataset, DataLoader
-from utils import GPTModel
+from gpt import GPTModel
 from gpt_download import download_and_load_gpt2, load_weights_into_gpt
 
 
