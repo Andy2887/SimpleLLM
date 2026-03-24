@@ -81,6 +81,7 @@ python gpt_instruction_finetuning.py --epochs 3 --batch_size 4 --lr 1e-5 --max_l
 
 ## TODO
 
+1. Convert GPT to Llama.
 1. Add kv-cache.
 2. Add LoRA fine-tuning.
 
