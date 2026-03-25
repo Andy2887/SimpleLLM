@@ -357,3 +357,21 @@ LLAMA32_CONFIG_3B = {
         "original_context_length": 8192,
     }
 }
+
+LLAMA31_CONFIG_8B = {
+    "vocab_size": 128_256,
+    "context_length": 131_072,
+    "emb_dim": 4096,
+    "n_heads": 32,
+    "n_layers": 32,
+    "hidden_dim": 14_336,
+    "n_kv_groups": 8,
+    "rope_base": 500_000.0,
+    "dtype": torch.bfloat16,
+    "rope_freq": {
+        "factor": 8.0,
+        "low_freq_factor": 1.0,
+        "high_freq_factor": 4.0,
+        "original_context_length": 8192,
+    }
+}
