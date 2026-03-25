@@ -10,16 +10,32 @@ def token_ids_to_text(token_ids, tokenizer):
     flat = token_ids.squeeze(0) # remove batch dimension
     return tokenizer.decode(flat.tolist())
 
-def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None, eos_id=None):
+def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None, eos_id=None, use_cache=True):
+
+    if use_cache:
+        cache = KVCache(model.cfg["n_layers"])
+        model.reset_kv_cache()
+    else:
+        cache = None
 
     for _ in range(max_new_tokens):
 
-        # If the number of input tokens is greater than context length, we cut the input token
-        idx_cond = idx[:, -context_size:]
-        with torch.no_grad():
-            logits = model(idx_cond)
+        if use_cache:
+            if model.current_pos == 0:
+                # Prefill: process entire prompt
+                input_ids = idx
+            else:
+                # Decode: only the last token (previous K/V are cached)
+                input_ids = idx[:, -1:]
+        else:
+            input_ids = idx[:, -context_size:]
 
-        # We only look at the last token (the one we want)
+        with torch.no_grad():
+            logits = model(input_ids, cache=cache)
+
+        if use_cache:
+            model.current_pos += input_ids.shape[1]
+
         logits = logits[:, -1, :]
 
         # Filter logits with top_k sampling
@@ -32,17 +48,15 @@ def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=No
         if temperature > 0.0:
             logits = logits / temperature
             logits = logits - logits.max(dim=-1, keepdim=True).values
-            probs = torch.softmax(logits, dim=-1)  # (batch_size, context_len)
-            idx_next = torch.multinomial(probs, num_samples=1)  # (batch_size, 1)
+            probs = torch.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
         else:
-            idx_next = torch.argmax(logits, dim=-1, keepdim=True)  # (batch_size, 1)
+            idx_next = torch.argmax(logits, dim=-1, keepdim=True)
 
-        # Stop if EOS token is generated
         if eos_id is not None and idx_next.item() == eos_id:
             break
 
-        # Append token to the sequence as the input of next round
-        idx = torch.cat((idx, idx_next), dim=1)  # (batch_size, num_tokens+1)
+        idx = torch.cat((idx, idx_next), dim=1)
 
     return idx
 
@@ -54,3 +68,20 @@ def format_instruction_prompt(prompt):
         f"### Instruction:\n{prompt}\n\n"
         f"### Response:\n"
     )
+
+class KVCache:
+    def __init__(self, n_layers):
+        self.cache = [None] * n_layers
+
+    def get(self, layer_idx):
+        return self.cache[layer_idx]
+
+    def update(self, layer_idx, value):
+        self.cache[layer_idx] = value
+
+    def get_all(self):
+        return self.cache
+
+    def reset(self):
+        for i in range(len(self.cache)):
+            self.cache[i] = None
