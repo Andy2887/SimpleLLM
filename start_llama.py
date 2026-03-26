@@ -2,8 +2,23 @@ from llama import *
 from utils import *
 import argparse
 
-DEFAULT_WEIGHTS_PATH = os.path.expanduser("~/.llama/checkpoints/Llama3.2-1B/consolidated.00.pth")
-DEFAULT_TOKENIZER_PATH = os.path.expanduser("~/.llama/checkpoints/Llama3.2-1B/tokenizer.model")
+MODEL_CONFIGS = {
+    "1B": {
+        "config": LLAMA32_CONFIG_1B,
+        "weights": os.path.expanduser("~/.llama/checkpoints/Llama3.2-1B/consolidated.00.pth"),
+        "tokenizer": os.path.expanduser("~/.llama/checkpoints/Llama3.2-1B/tokenizer.model"),
+    },
+    "3B": {
+        "config": LLAMA32_CONFIG_3B,
+        "weights": os.path.expanduser("~/.llama/checkpoints/Llama3.2-3B/consolidated.00.pth"),
+        "tokenizer": os.path.expanduser("~/.llama/checkpoints/Llama3.2-3B/tokenizer.model"),
+    },
+    "8B": {
+        "config": LLAMA31_CONFIG_8B,
+        "weights": os.path.expanduser("~/.llama/checkpoints/Llama3.1-8B/consolidated.00.pth"),
+        "tokenizer": os.path.expanduser("~/.llama/checkpoints/Llama3.1-8B/tokenizer.model"),
+    },
+}
 
 
 def main(config, input_prompt, device, weights_path, tokenizer_path):
@@ -45,7 +60,13 @@ def main(config, input_prompt, device, weights_path, tokenizer_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Generate text with a pretrained Llama 3.2 model."
+        description="Generate text with a pretrained Llama model."
+    )
+    parser.add_argument(
+        "--model",
+        default="1B",
+        choices=["1B", "3B", "8B"],
+        help="Model size: 1B (Llama 3.2), 3B (Llama 3.2), or 8B (Llama 3.1)."
     )
     parser.add_argument(
         "--prompt",
@@ -59,16 +80,21 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--weights",
-        default=DEFAULT_WEIGHTS_PATH,
-        help="Path to the pretrained weights file."
+        default=None,
+        help="Path to the pretrained weights file. Defaults to the standard path for the chosen model."
     )
     parser.add_argument(
         "--tokenizer",
-        default=DEFAULT_TOKENIZER_PATH,
-        help="Path to the tokenizer model file."
+        default=None,
+        help="Path to the tokenizer model file. Defaults to the standard path for the chosen model."
     )
 
     args = parser.parse_args()
+
+    model_info = MODEL_CONFIGS[args.model]
+    config = model_info["config"]
+    weights_path = args.weights or model_info["weights"]
+    tokenizer_path = args.tokenizer or model_info["tokenizer"]
 
     if args.device == "auto":
         if torch.cuda.is_available():
@@ -82,5 +108,6 @@ if __name__ == "__main__":
 
     print("PyTorch:", torch.__version__)
     print("Device:", device)
+    print("Model:", args.model)
 
-    main(LLAMA32_CONFIG_1B, args.prompt, device, args.weights, args.tokenizer)
+    main(config, args.prompt, device, weights_path, tokenizer_path)
