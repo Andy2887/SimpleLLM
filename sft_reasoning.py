@@ -1,14 +1,3 @@
-"""
-Phase 1.1: Supervised Fine-Tuning (SFT) — Full Fine-Tuning
-
-Trains all parameters of Llama 3.2 1B on chain-of-thought data to teach
-the model to produce <think>...</think><answer>...</answer> structured output.
-
-Usage:
-    python sft_reasoning.py --device auto
-    python sft_reasoning.py --device cuda --epochs 3 --batch_size 4
-"""
-
 import os
 import math
 import argparse
@@ -25,7 +14,7 @@ SFT_CONFIG = {
     "learning_rate": 2e-5,
     "weight_decay": 0.1,
     "warmup_steps": 100,
-    "max_seq_len": 2048,
+    "max_seq_len": 1024,
     "grad_clip": 1.0,
 }
 

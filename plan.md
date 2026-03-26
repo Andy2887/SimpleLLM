@@ -6,28 +6,6 @@ Transform the Llama 3.2 1B model into a reasoning model that can solve logic puz
 1. **SFT (Supervised Fine-Tuning)** with **full fine-tuning** on chain-of-thought data with `<think>` and `<answer>` structured output
 2. **RL (GRPO — Group Relative Policy Optimization)** to further refine reasoning quality through reward-based optimization
 
-## Fine-Tuning Method: Full Fine-Tuning
-
-We use **full fine-tuning** to maximize the model's capacity for learning logical reasoning.
-
-**Why Full Fine-Tuning:**
-- Maximizes model capacity — all parameters adapt to the target task
-- Better suited for teaching fundamentally new reasoning capabilities
-- Feasible with a 1B model — trainable on consumer GPUs even with all parameters unfrozen
-- No adapter complexity — simpler training pipeline and checkpoint management
-
-**GPU Memory Estimate (1B model, full fine-tuning, BF16):**
-
-| Component | Calculation | Memory |
-|---|---|---|
-| Model weights (BF16) | 1B × 2 bytes | ~2 GB |
-| Gradients (BF16) | 1B × 2 bytes | ~2 GB |
-| Optimizer states (AdamW FP32: param + momentum + variance) | 1B × 12 bytes | ~12 GB |
-| Activations (batch=4, seq=2048) | varies | ~4-8 GB |
-| **Total** | | **~20-24 GB** |
-
-A single GPU with 24 GB VRAM (e.g., RTX 4090 or A5000) is sufficient.
-
 ---
 
 ## Phase 0: Data Preparation
@@ -100,12 +78,11 @@ Create `sft_reasoning.py`:
 ```python
 sft_config = {
     "epochs": 3,
-    "batch_size": 4,
-    "gradient_accumulation_steps": 4,  # effective batch size = 16
+    "batch_size": 16,
     "learning_rate": 2e-5,
     "weight_decay": 0.1,
     "warmup_steps": 100,
-    "max_seq_len": 2048,
+    "max_seq_len": 1024,
     "grad_clip": 1.0,
 }
 ```
@@ -119,6 +96,19 @@ sft_config = {
 - Gradient accumulation to simulate larger batch sizes
 - Validation loss every N steps
 - Save full model checkpoint at end of each epoch
+
+---
+
+### 1.2 — GPU Memory Estimate (GRPO with Full Fine-Tuning)
+
+| Component | Calculation | Memory |
+|---|---|---|
+| Model weights (BF16) | 1B × 2 bytes | ~2 GB |
+| Gradients (BF16) | 1B × 2 bytes | ~2 GB |
+| Optimizer states (AdamW FP32) | 1B × 12 bytes | ~12 GB |
+| Activations (batch=16, seq~1024) | varies | ~5 GB |
+| Stored log-probs (policy + ref) | negligible | ~0.01 GB |
+| **Total** | | **~20 - 25 GB** |
 
 ---
 
@@ -137,29 +127,7 @@ Primary signal is **correctness** — this is what drives the model to actually 
 
 ### 2.2 — GPU Memory Estimate (GRPO with Full Fine-Tuning)
 
-GRPO is more memory-intensive than SFT due to multi-completion generation and reference log-prob computation. With full fine-tuning, we need a separate copy of the reference model weights.
-
-**Generation phase** (forward only, batch=2 × group_size=4 = 8 sequences):
-
-| Component | Memory |
-|---|---|
-| Policy model (BF16) | ~2 GB |
-| KV cache (8 seqs × ~1536 tokens) | ~0.2 GB |
-| **Peak** | **~2.2 GB** |
-
-**Training phase** (forward + backward, the bottleneck):
-
-| Component | Calculation | Memory |
-|---|---|---|
-| Policy model weights (BF16) | 1B × 2 bytes | ~2 GB |
-| Reference model weights (BF16) | 1B × 2 bytes | ~2 GB |
-| Gradients (BF16) | 1B × 2 bytes | ~2 GB |
-| Optimizer states (AdamW FP32) | 1B × 12 bytes | ~12 GB |
-| Activations (batch=2, seq~1536) | varies | ~3-6 GB |
-| Stored log-probs (policy + ref) | negligible | ~0.01 GB |
-| **Total** | | **~21-24 GB** |
-
-A 24 GB GPU (RTX 4090) is sufficient with gradient checkpointing.
+TODO
 
 ### 2.3 — GRPO Training Script
 
