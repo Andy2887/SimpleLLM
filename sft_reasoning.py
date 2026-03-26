@@ -34,6 +34,8 @@ def main():
     parser.add_argument("--lr", type=float, default=SFT_CONFIG["learning_rate"])
     parser.add_argument("--max_seq_len", type=int, default=SFT_CONFIG["max_seq_len"])
     parser.add_argument("--log_interval", type=int, default=10, help="Log every N batches")
+    parser.add_argument("--no_gradient_checkpointing", action="store_true",
+                        help="Disable gradient checkpointing (enabled by default)")
     parser.add_argument(
         "--weights",
         default=os.path.expanduser("~/.llama/checkpoints/Llama3.2-1B/consolidated.00.pth"),
@@ -83,6 +85,9 @@ def main():
 
     model.to(device)
     model.train()
+    if not args.no_gradient_checkpointing:
+        model.gradient_checkpointing = True
+        print("Gradient checkpointing enabled")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # ---- Optimizer ----

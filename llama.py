@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+import torch.utils.checkpoint
 from pathlib import Path
 
 import tiktoken
@@ -176,6 +177,7 @@ class Llama3Model(nn.Module):
 
         self.cfg = cfg
         self.current_pos = 0
+        self.gradient_checkpointing = False
 
     def forward(self, in_idx, cache=None):
         tok_embeds = self.tok_emb(in_idx)
@@ -198,7 +200,13 @@ class Llama3Model(nn.Module):
 
         for i, block in enumerate(self.trf_blocks):
             blk_cache = cache.get(i) if cache else None
-            x, new_blk_cache = block(x, mask, self.cos, self.sin, start_pos=pos_start, cache=blk_cache)
+            if self.gradient_checkpointing and self.training and cache is None:
+                x, new_blk_cache = torch.utils.checkpoint.checkpoint(
+                    block, x, mask, self.cos, self.sin, pos_start, None,
+                    use_reentrant=False
+                )
+            else:
+                x, new_blk_cache = block(x, mask, self.cos, self.sin, start_pos=pos_start, cache=blk_cache)
             if cache is not None:
                 cache.update(i, new_blk_cache)
 
