@@ -34,32 +34,51 @@ A single GPU with 24 GB VRAM (e.g., RTX 4090 or A5000) is sufficient.
 
 ### 0.1 — Chain-of-Thought Dataset
 
-Create or curate a CoT dataset where each sample follows this format:
+Use a CoT dataset and create samples in this format:
 
 ```
 <|begin_of_text|><|start_header_id|>system<|end_header_id|>
 You are a helpful assistant that thinks step by step.<|eot_id|>
 <|start_header_id|>user<|end_header_id|>
-{question}<|eot_id|>
+{input}<|eot_id|>
 <|start_header_id|>assistant<|end_header_id|>
 <think>
-{step-by-step reasoning}
+{think}
 </think>
 <answer>
-{final answer}
+{output}
 </answer><|eot_id|>
 ```
 
-**Data source:**
-- **Logic puzzle / logical reasoning dataset** — e.g., LogiQA, ReClor, or curated logic puzzles with step-by-step reasoning traces
+**Data source:** [comoZ/reasoning-dataset](https://huggingface.co/datasets/comoZ/reasoning-dataset)
+
+This dataset has two split: 'sft' and 'fl'. Here's an example of one row:
+
+```
+{
+   "input":"From Monday to Friday, Elle practices piano for 30 minutes. On Saturday, she practices piano three times as much as on a weekday. There is no practice on Sunday.  How many hours does Elle spend practicing piano each week?",
+   "output":"4",
+   "think":"From Monday to Friday, Elle practices 0.50 x 5 = 2.5 hours.\nOn Saturday, she practices 0.50 x 3 = 1.5 hours.\nEach week, Elle practices piano for 2.5 + 1.5 = 4 hours.",
+   "source":"gsm8k",
+   "type":"math",
+   "task_type":"Math",
+   "rubrics":"1. Correctly identifies the practice times for weekdays (30 minutes each), Saturday (3 * 30 minutes), and Sunday (0 minutes). Explicitly states the week consists of 5 weekdays.\n2. Accurately calculates the total practice time in minutes: (5 days * 30 minutes/day) + (3 * 30 minutes) + 0 minutes. Demonstrates correct multiplication and addition to find the total minutes.\n3. Correctly converts the total practice time from minutes to hours by dividing by 60.  The final answer is a reasonable value given the practice schedule (less than 5 hours)."
+}
+```
+
+You could look at `data_prep/check_data.py` for more information about how to access data from this dataset.
+
+For SFT, we will use the 'sft' split. We will only train on the rows where "source: databricks_thinking".
+
+For RL, we will use the 'rl' split. We will only train on the the rows where "source: gsm8k".
 
 ### 0.2 — Data Processing Pipeline
 
-Create `data/prepare_cot_data.py`:
-- Load raw dataset (JSON/JSONL/Hugging Face datasets)
+Create `data_prep/prepare_cot_data.py`:
+- Load raw dataset (Hugging Face datasets)
 - Format into the Llama 3.2 chat template using the existing `Tokenizer` class
 - Map `<think>`, `</think>`, `<answer>`, `</answer>` to existing reserved token slots in the tokenizer (`<|reserved_0|>` → 128002, `<|reserved_1|>` → 128003, `<|reserved_2|>` → 128004, `<|reserved_3|>` → 128005). No vocab resize needed — these embedding rows already exist in the pretrained weights.
-- Split into train (90%) / val (10%)
+- 100% training set. No validation set.
 
 ### 0.3 — Dataset Class
 
@@ -100,19 +119,6 @@ sft_config = {
 - Gradient accumulation to simulate larger batch sizes
 - Validation loss every N steps
 - Save full model checkpoint at end of each epoch
-
-**Memory Optimization (for consumer GPUs):**
-- 1B model with full fine-tuning — estimated **~20-24 GB VRAM**
-- bfloat16 mixed precision via `torch.autocast`
-- Gradient checkpointing (`torch.utils.checkpoint`) on transformer blocks to trade compute for memory
-- Gradient accumulation (effective batch size 16, actual batch size 4)
-
-### 1.2 — SFT Validation
-
-- Track val loss per epoch
-- Generate sample outputs on a held-out set of 20 questions after each epoch
-- Verify model produces well-formed `<think>...</think><answer>...</answer>` structure
-- Save the best full model checkpoint by val loss → `checkpoints/sft_reasoning.pth`
 
 ---
 

@@ -219,6 +219,10 @@ class Tokenizer:
         self.special = {
             "<|begin_of_text|>": 128000,
             "<|end_of_text|>": 128001,
+            "<think>": 128002,
+            "</think>": 128003,
+            "<answer>": 128004,
+            "</answer>": 128005,
             "<|start_header_id|>": 128006,
             "<|end_header_id|>": 128007,
             "<|eot_id|>": 128009,
