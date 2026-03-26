@@ -14,7 +14,7 @@ SFT_CONFIG = {
     "learning_rate": 2e-5,
     "weight_decay": 0.1,
     "warmup_steps": 100,
-    "max_seq_len": 1024,
+    "max_seq_len": 512,
     "grad_clip": 1.0,
 }
 
