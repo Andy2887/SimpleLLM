@@ -1,35 +1,29 @@
-# Plan: Enable Reasoning for Llama 3.1 8B via LoRA SFT + GRPO
+# Plan: Enable Reasoning for Llama 3.2 1B via Full Fine-Tuning SFT + GRPO
 
 ## Goal
 
-Transform the Llama 3.1 8B model into a reasoning model by:
-1. **SFT (Supervised Fine-Tuning)** with **LoRA (Low-Rank Adaptation)** on chain-of-thought data with `<think>` and `<answer>` structured output
+Transform the Llama 3.2 1B model into a reasoning model that can solve logic puzzles by:
+1. **SFT (Supervised Fine-Tuning)** with **full fine-tuning** on chain-of-thought data with `<think>` and `<answer>` structured output
 2. **RL (GRPO — Group Relative Policy Optimization)** to further refine reasoning quality through reward-based optimization
 
-## Fine-Tuning Method: LoRA
+## Fine-Tuning Method: Full Fine-Tuning
 
-We use **LoRA** instead of full fine-tuning for parameter-efficient training.
+We use **full fine-tuning** to maximize the model's capacity for learning logical reasoning.
 
-**Why LoRA:**
-- Gets 90-95% of full fine-tuning performance at a fraction of the cost
-- Works well for domain adaptation and instruction tuning
-- Regularizes better with limited data, reducing overfitting
-- Enables fine-tuning on consumer GPUs
+**Why Full Fine-Tuning:**
+- Maximizes model capacity — all parameters adapt to the target task
+- Better suited for teaching fundamentally new reasoning capabilities
+- Feasible with a 1B model — trainable on consumer GPUs even with all parameters unfrozen
+- No adapter complexity — simpler training pipeline and checkpoint management
 
-**LoRA Config:**
-- Rank: 64, Alpha: 128
-- Target modules: `q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj`
-- Trainable params: ~1-2% of total model parameters
-
-**GPU Memory Estimate (8B model with LoRA, BF16 base):**
+**GPU Memory Estimate (1B model, full fine-tuning, BF16):**
 
 | Component | Calculation | Memory |
 |---|---|---|
-| Base model weights (BF16) | 8B × 2 bytes | ~16 GB |
-| LoRA adapter weights | ~160M × 2 bytes | ~0.3 GB |
-| Gradients (LoRA params only) | ~160M × 2 bytes | ~0.3 GB |
-| Optimizer states (LoRA params, AdamW FP32) | ~160M × 12 bytes | ~1.9 GB |
-| Activations (batch=2, seq=2048) | varies | ~4-8 GB |
+| Model weights (BF16) | 1B × 2 bytes | ~2 GB |
+| Gradients (BF16) | 1B × 2 bytes | ~2 GB |
+| Optimizer states (AdamW FP32: param + momentum + variance) | 1B × 12 bytes | ~12 GB |
+| Activations (batch=4, seq=2048) | varies | ~4-8 GB |
 | **Total** | | **~20-24 GB** |
 
 A single GPU with 24 GB VRAM (e.g., RTX 4090 or A5000) is sufficient.
@@ -57,13 +51,13 @@ You are a helpful assistant that thinks step by step.<|eot_id|>
 ```
 
 **Data source:**
-- **OpenR1-Math-220k** — high-quality math reasoning traces
+- **Logic puzzle / logical reasoning dataset** — e.g., LogiQA, ReClor, or curated logic puzzles with step-by-step reasoning traces
 
 ### 0.2 — Data Processing Pipeline
 
 Create `data/prepare_cot_data.py`:
 - Load raw dataset (JSON/JSONL/Hugging Face datasets)
-- Format into the Llama 3.1 chat template using the existing `Tokenizer` class
+- Format into the Llama 3.2 chat template using the existing `Tokenizer` class
 - Map `<think>`, `</think>`, `<answer>`, `</answer>` to existing reserved token slots in the tokenizer (`<|reserved_0|>` → 128002, `<|reserved_1|>` → 128003, `<|reserved_2|>` → 128004, `<|reserved_3|>` → 128005). No vocab resize needed — these embedding rows already exist in the pretrained weights.
 - Split into train (90%) / val (10%)
 
@@ -77,7 +71,7 @@ Create `cot_dataset.py`:
 
 ---
 
-## Phase 1: Supervised Fine-Tuning (SFT) with LoRA
+## Phase 1: Supervised Fine-Tuning (SFT) — Full Fine-Tuning
 
 ### 1.1 — SFT Training Script
 
@@ -87,42 +81,38 @@ Create `sft_reasoning.py`:
 ```python
 sft_config = {
     "epochs": 3,
-    "batch_size": 2,              # small for 8B on consumer GPU
-    "gradient_accumulation_steps": 8,  # effective batch size = 16
+    "batch_size": 4,
+    "gradient_accumulation_steps": 4,  # effective batch size = 16
     "learning_rate": 2e-5,
     "weight_decay": 0.1,
     "warmup_steps": 100,
     "max_seq_len": 2048,
     "grad_clip": 1.0,
-    # LoRA config
-    "lora_rank": 64,
-    "lora_alpha": 128,
-    "lora_target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
 }
 ```
 
 **Training Loop:**
-- Freeze base model weights; only train LoRA adapter parameters
-- Optimizer: AdamW (only over LoRA parameters)
+- Train all model parameters (full fine-tuning)
+- Optimizer: AdamW (over all parameters)
 - LR schedule: linear warmup → cosine decay
 - Loss: cross-entropy with `ignore_index=-100` (masked prompt tokens)
 - Gradient clipping: max norm 1.0
 - Gradient accumulation to simulate larger batch sizes
 - Validation loss every N steps
-- Save LoRA adapter checkpoint at end of each epoch
+- Save full model checkpoint at end of each epoch
 
 **Memory Optimization (for consumer GPUs):**
-- LoRA reduces trainable parameters to ~1-2% of total — estimated **~20-24 GB VRAM** for an 8B model
+- 1B model with full fine-tuning — estimated **~20-24 GB VRAM**
 - bfloat16 mixed precision via `torch.autocast`
 - Gradient checkpointing (`torch.utils.checkpoint`) on transformer blocks to trade compute for memory
-- Gradient accumulation (effective batch size 16, actual batch size 2)
+- Gradient accumulation (effective batch size 16, actual batch size 4)
 
 ### 1.2 — SFT Validation
 
 - Track val loss per epoch
 - Generate sample outputs on a held-out set of 20 questions after each epoch
 - Verify model produces well-formed `<think>...</think><answer>...</answer>` structure
-- Save the best checkpoint by val loss → `checkpoints/sft_reasoning.pth`
+- Save the best full model checkpoint by val loss → `checkpoints/sft_reasoning.pth`
 
 ---
 
@@ -135,37 +125,35 @@ Create `rewards.py` with composable reward signals:
 | Reward Component    | Weight | Description |
 |---------------------|--------|-------------|
 | **Format reward**   | 0.1    | +1 if output contains valid `<think>...</think><answer>...</answer>` structure, 0 otherwise |
-| **Correctness reward** | 0.7 | +1 if extracted answer matches ground truth (exact match or numerical equivalence), 0 otherwise |
-| **Reasoning length reward** | 0.1 | Small bonus for non-trivial reasoning (penalize empty `<think>` blocks), capped to avoid reward hacking |
-| **Cosine similarity reward** | 0.1 | Soft partial-credit via embedding similarity between predicted and ground-truth answer (optional, for non-exact-match tasks) |
+| **Correctness reward** | 0.9 | +1 if extracted answer matches ground truth (exact match or numerical equivalence), 0 otherwise |
 
 Primary signal is **correctness** — this is what drives the model to actually reason better.
 
-### 2.2 — GPU Memory Estimate (GRPO with LoRA)
+### 2.2 — GPU Memory Estimate (GRPO with Full Fine-Tuning)
 
-GRPO is more memory-intensive than SFT due to multi-completion generation and reference log-prob computation. With LoRA, the reference model is free — it shares the base weights (just disables LoRA adapters).
+GRPO is more memory-intensive than SFT due to multi-completion generation and reference log-prob computation. With full fine-tuning, we need a separate copy of the reference model weights.
 
 **Generation phase** (forward only, batch=2 × group_size=4 = 8 sequences):
 
 | Component | Memory |
 |---|---|
-| Base model + LoRA (BF16) | ~16.3 GB |
-| KV cache (8 seqs × ~1536 tokens) | ~1.5 GB |
-| **Peak** | **~18 GB** |
+| Policy model (BF16) | ~2 GB |
+| KV cache (8 seqs × ~1536 tokens) | ~0.2 GB |
+| **Peak** | **~2.2 GB** |
 
 **Training phase** (forward + backward, the bottleneck):
 
 | Component | Calculation | Memory |
 |---|---|---|
-| Base model weights (BF16) | 8B × 2 bytes | ~16 GB |
-| LoRA adapters | ~160M × 2 bytes | ~0.3 GB |
-| LoRA gradients | ~160M × 2 bytes | ~0.3 GB |
-| Optimizer states (AdamW FP32) | ~160M × 12 bytes | ~1.9 GB |
-| Activations (batch=2, seq~1536) | varies | ~6-10 GB |
+| Policy model weights (BF16) | 1B × 2 bytes | ~2 GB |
+| Reference model weights (BF16) | 1B × 2 bytes | ~2 GB |
+| Gradients (BF16) | 1B × 2 bytes | ~2 GB |
+| Optimizer states (AdamW FP32) | 1B × 12 bytes | ~12 GB |
+| Activations (batch=2, seq~1536) | varies | ~3-6 GB |
 | Stored log-probs (policy + ref) | negligible | ~0.01 GB |
-| **Total** | | **~24-28 GB** |
+| **Total** | | **~21-24 GB** |
 
-A 24 GB GPU (RTX 4090) is tight but feasible with gradient checkpointing. A 48 GB GPU (A6000/A40) gives comfortable headroom.
+A 24 GB GPU (RTX 4090) is sufficient with gradient checkpointing.
 
 ### 2.3 — GRPO Training Script
 
@@ -205,9 +193,9 @@ grpo_config = {
 ### 3.1 — Benchmarks
 
 Evaluate on held-out reasoning benchmarks:
-- **GSM8K** (grade-school math) — primary benchmark
-- **MATH** (competition math) — stretch goal
-- Custom held-out set from the training distribution
+- **LogiQA** (logical reasoning) — primary benchmark
+- **ReClor** (reading comprehension requiring logical reasoning) — stretch goal
+- Custom held-out set of logic puzzles from the training distribution
 
 ### 3.2 — Evaluation Script
 
