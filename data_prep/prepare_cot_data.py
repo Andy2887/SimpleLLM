@@ -40,7 +40,7 @@ def format_chat_tokens(tokenizer, input_text, think_text, answer_text):
         prompt_len: int - number of prompt tokens (for loss masking)
     """
     sp = tokenizer.special
-    enc = tokenizer.model.encode
+    enc = lambda text: tokenizer.model.encode(text, disallowed_special=())
 
     BOS = sp["<|begin_of_text|>"]
     START_HEADER = sp["<|start_header_id|>"]
@@ -132,7 +132,7 @@ def load_and_process_rl_data(tokenizer, max_seq_len=2048):
     print(f"Filtered to {len(ds)} gsm8k examples")
 
     sp = tokenizer.special
-    enc = tokenizer.model.encode
+    enc = lambda text: tokenizer.model.encode(text, disallowed_special=())
 
     processed = []
     for row in ds:
