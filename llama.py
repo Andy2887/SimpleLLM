@@ -257,7 +257,7 @@ class Tokenizer:
 
     def encode(self, text, bos=True, eos=False):
         ids = ([self.special["<|begin_of_text|>"]] if bos else []) \
-              + self.model.encode(text)
+              + self.model.encode(text, allowed_special="all")
         if eos:
             ids.append(self.special["<|end_of_text|>"])
         return ids

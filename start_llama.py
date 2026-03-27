@@ -21,6 +21,17 @@ MODEL_CONFIGS = {
 }
 
 
+def format_prompt(input_text):
+    return (
+        "<|begin_of_text|>"
+        "<|start_header_id|>system<|end_header_id|>\n"
+        "You are a helpful assistant that thinks step by step.<|eot_id|>\n"
+        "<|start_header_id|>user<|end_header_id|>\n"
+        f"{input_text}<|eot_id|>\n"
+        "<|start_header_id|>assistant<|end_header_id|>\n"
+    )
+
+
 def main(config, input_prompt, device, weights_path, tokenizer_path):
     print("Loading model...")
     model = Llama3Model(config)
@@ -36,16 +47,18 @@ def main(config, input_prompt, device, weights_path, tokenizer_path):
 
     tokenizer = Tokenizer(tokenizer_path)
 
+    prompt = format_prompt(input_prompt)
+
     print("Start generating output...")
 
     token_ids = generate(
         model=model,
-        idx=text_to_token_ids(input_prompt, tokenizer).to(device),
+        idx=text_to_token_ids(prompt, tokenizer).to(device),
         max_new_tokens=50,
         context_size=config["context_length"],
         top_k=10,
         temperature=0.3,
-        eos_id=tokenizer.special["<|end_of_text|>"]
+        eos_id=tokenizer.special["<|eot_id|>"]
     )
 
     output_text = token_ids_to_text(token_ids, tokenizer)
