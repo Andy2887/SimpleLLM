@@ -91,7 +91,6 @@ def main():
 
     print(f"Total steps (questions): {total_steps}")
     print(f"Num rollouts per question: {args.num_rollouts}")
-    print(f"Checkpoint every {checkpoint_interval} steps (1/10 of total)")
     print("Starting GRPO training...\n")
 
     timer_start = time.time()
@@ -141,7 +140,7 @@ def main():
             metrics_writer.writerow([step + 1, "N/A", f"{reward_avg:.4f}", f"{avg_response_len:.1f}"])
             metrics_file.flush()
 
-            if (step + 1) % 10 == 0:
+            if (step + 1) % 5 == 0:
                 elapsed = time.time() - timer_start
                 avg_step_time = elapsed / 10
                 remaining = avg_step_time * (total_steps - step - 1)
@@ -153,7 +152,7 @@ def main():
                 )
                 prompt_text = tokenizer.decode(prompt_tokens)
                 print(f"  [Sample] Q: ...{prompt_text[-150:]}")
-                print(f"  [Sample] A: {response_texts[0][:300]}")
+                print(f"  [Sample] A: {response_texts[0]}")
                 print()
                 timer_start = time.time()
             continue
