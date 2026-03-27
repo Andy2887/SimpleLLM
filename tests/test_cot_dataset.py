@@ -8,7 +8,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
-from cot_dataset import CoTDataset, cot_collate_fn
+from data_prep.cot_dataset import CoTDataset, cot_collate_fn
 
 
 # Helper: fake tokenized data as (token_ids, prompt_len) tuples

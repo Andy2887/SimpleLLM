@@ -116,18 +116,25 @@ sft_config = {
 
 ### 2.1 — Reward Functions
 
-Create `rewards.py` with composable reward signals:
+Create `rewards.py` with only one reward signal:
 
-| Reward Component    | Weight | Description |
-|---------------------|--------|-------------|
-| **Format reward**   | 0.1    | +1 if output contains valid `<think>...</think><answer>...</answer>` structure, 0 otherwise |
-| **Correctness reward** | 0.9 | +1 if extracted answer matches ground truth (exact match or numerical equivalence), 0 otherwise |
+**Correctness reward**: +1 if output contains `<answer>...</answer>` structure and `<answer>...</answer>` contains the ground truth (exact match or numerical equivalence), 0 otherwise.
 
-Primary signal is **correctness** — this is what drives the model to actually reason better.
+Note: Answers don't need to be exact — as long as the <answer> field contains the ground truth, it counts. For example, both "15" and "Andy's age is 15" are valid when the ground truth is 15.
 
 ### 2.2 — GPU Memory Estimate (GRPO with Full Fine-Tuning)
 
-TODO
+GRPO differs from SFT in two key ways: (1) a frozen **reference model** is kept in memory alongside the policy model, and (2) the training step processes `num_rollouts=4` sequences per question. Peak memory occurs during the **training phase** — the generation phase (KV cache) runs separately and its memory is freed before training begins.
+
+| Component | Calculation | Memory |
+|---|---|---|
+| Policy model weights (BF16) | 1B × 2 bytes | ~2 GB |
+| Reference model weights (BF16) | 1B × 2 bytes (frozen copy) | ~2 GB |
+| Gradients (BF16) | 1B × 2 bytes (policy only) | ~2 GB |
+| Optimizer states (AdamW FP32) | 1B × 12 bytes (master weights + m + v) | ~12 GB |
+| Activations (eff. batch=4, seq=1024, checkpointed) | varies | ~3 GB |
+| KV cache (generation phase) | freed before training step | 0 GB |
+| **Total** | | **~21–23 GB** |
 
 ### 2.3 — GRPO Training Script
 
@@ -136,29 +143,64 @@ Create `grpo_reasoning.py`:
 **GRPO Config:**
 ```python
 grpo_config = {
-    "epochs": 2,
-    "group_size": 4,              # G completions per prompt
-    "batch_size": 2,              # prompts per batch (generates G * batch_size completions)
-    "learning_rate": 5e-7,        # much lower than SFT
-    "kl_coeff": 0.05,             # KL penalty coefficient (beta)
-    "clip_eps": 0.2,              # PPO-style clipping epsilon
+    "num_rollouts": 4,            # number of times the model answers per question
+    "learning_rate": 1e-6,        
     "max_gen_len": 1024,          # max tokens for generated completions
     "temperature": 0.7,           # sampling temperature for exploration
     "grad_clip": 1.0,
+    "weight_decay": 0.1,
 }
 ```
 
+Details:
+
+1. grpo_reasoning will read the initial weights from `checkpoints/sft_reasoning_final.pth`. This is the chain-of-thought fine-tuned weights.
+
+2. The advantage is calculated as: `advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)`
+
+- If all the rewards are the same, simply skip this step and continue.
+
+3. We will not implement KL Loss Term. This means no reference model is used.
+
+4. The generation function:
+
+Iterate over training steps.
+
+For each training step:
+
+    Reset loss gradient
+
+    calculate GRPO loss
+
+    Backward pass to calculate loss gradients
+
+    Clip large gradients to improve training stability
+
+    Update model weights using loss gradients
+
+    Print step metrics (loss, reward, average response length), and save information to CSV named `metrics/rl_metrics.csv`
+
+    Every 1/10 of the total steps, saves to checkpoints/fl_reasoning_step{step}.pth
+
+Save the resulting weights to `checkpoints/rl_reasoning_final.pth`.
+
+5. We will not use gradient accumulation
+
+6. Only one pass over the RL dataset.
+
+7. The prompts are structured the same way as the one we use in SFT.
+
+8. For grad_clip and weight_decay, 
+
 ### 2.4 — GRPO Data
 
-- Use the **same question set** as SFT (or a superset), but only the prompts (not the CoT traces)
-- Ground-truth answers are used only by the reward function, never shown to the model
-- The model must discover its own reasoning chains — this is the key benefit of RL over SFT
+- Use `rl` split from `comoZ/reasoning-dataset` (see `load_and_process_rl_data()` in prepare_cot_data.py)
 
 ### 2.5 — GRPO Monitoring
 
-- Track: mean reward, reward std, KL divergence, policy loss, advantage distribution
-- Log sample completions every N steps to inspect reasoning quality
-- Save checkpoints periodically → `checkpoints/grpo_reasoning_step_{N}.pth`
+- For every step, the model will print out loss, reward average and average response length.
+- Log sample output every 10 steps (questions) to inspect reasoning quality.
+- Also, keep a timer. For every 10 steps, print out the elapsed time during these 10 steps, and estimate remaining training time based on the time left. 
 
 ---
 
