@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--weight_decay", type=float, default=GRPO_CONFIG["weight_decay"])
     parser.add_argument("--no_gradient_checkpointing", action="store_true",
                         help="Disable gradient checkpointing (enabled by default)")
+    parser.add_argument("--mid_epoch_checkpoints", action="store_true",
+                        help="Save checkpoints every 1/10 of total steps")
     parser.add_argument(
         "--weights",
         default="checkpoints/sft_reasoning_final.pth",
@@ -215,7 +217,7 @@ def main():
             timer_start = time.time()
 
         # ---- Checkpoint (every 1/10 of total steps) ----
-        if (step + 1) % checkpoint_interval == 0:
+        if args.mid_epoch_checkpoints and (step + 1) % checkpoint_interval == 0:
             ckpt_path = f"checkpoints/fl_reasoning_step{step+1}.pth"
             torch.save(model.state_dict(), ckpt_path)
             print(f"  Saved checkpoint: {ckpt_path}")

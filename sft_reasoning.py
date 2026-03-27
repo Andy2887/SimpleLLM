@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--log_interval", type=int, default=10, help="Log every N batches")
     parser.add_argument("--no_gradient_checkpointing", action="store_true",
                         help="Disable gradient checkpointing (enabled by default)")
+    parser.add_argument("--mid_epoch_checkpoints", action="store_true",
+                        help="Save checkpoints every 1/10 epoch")
     parser.add_argument(
         "--weights",
         default=os.path.expanduser("~/.llama/checkpoints/Llama3.2-1B/consolidated.00.pth"),
@@ -158,7 +160,7 @@ def main():
                 metrics_file.flush()
 
             # Save checkpoint every 1/10 of an epoch
-            if (batch_idx + 1) % checkpoint_interval == 0:
+            if args.mid_epoch_checkpoints and (batch_idx + 1) % checkpoint_interval == 0:
                 ckpt_path = f"checkpoints/sft_reasoning_ep{epoch+1}_step{batch_idx+1}.pth"
                 torch.save(model.state_dict(), ckpt_path)
                 print(f"  Saved checkpoint: {ckpt_path}")
