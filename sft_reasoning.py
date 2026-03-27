@@ -1,5 +1,4 @@
 import os
-import math
 import argparse
 import torch
 from torch.utils.data import DataLoader
@@ -12,18 +11,9 @@ SFT_CONFIG = {
     "epochs": 3,
     "batch_size": 16,
     "learning_rate": 2e-5,
-    "weight_decay": 0.1,
-    "warmup_steps": 100,
-    "max_seq_len": 512,
+    "max_seq_len": 1024,
     "grad_clip": 1.0,
 }
-
-
-def get_lr(step, warmup_steps, total_steps, max_lr):
-    if step < warmup_steps:
-        return max_lr * (step + 1) / warmup_steps
-    progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
-    return max_lr * 0.5 * (1.0 + math.cos(math.pi * progress))
 
 
 def main():
@@ -91,17 +81,13 @@ def main():
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # ---- Optimizer ----
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=SFT_CONFIG["weight_decay"],
-        betas=(0.9, 0.999),
-    )
+    optimizer = torch.optim.AdamW(model.parameters(),lr=args.lr)
+
+    # ---- Scheduler ----
+    total_steps = len(train_loader) * args.epochs
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
 
     # ---- Training ----
-    total_steps = len(train_loader) * args.epochs
-    global_step = 0
-
     print(f"Batches per epoch: {len(train_loader)}")
     print(f"Batch size: {args.batch_size}")
     print(f"Total optimizer steps: {total_steps}")
@@ -125,16 +111,11 @@ def main():
             )
             loss.backward()
 
-            # Update learning rate
-            lr = get_lr(global_step, SFT_CONFIG["warmup_steps"], total_steps, args.lr)
-            for param_group in optimizer.param_groups:
-                param_group["lr"] = lr
-
             # Gradient clipping
             torch.nn.utils.clip_grad_norm_(model.parameters(), SFT_CONFIG["grad_clip"])
 
             optimizer.step()
-            global_step += 1
+            scheduler.step()
 
             batch_loss = loss.item()
             epoch_loss += batch_loss
@@ -145,7 +126,7 @@ def main():
                     f"  Epoch {epoch+1}/{args.epochs} | "
                     f"Batch {batch_idx+1}/{len(train_loader)} | "
                     f"Loss: {batch_loss:.4f} | "
-                    f"LR: {lr:.2e}"
+                    f"LR: {scheduler.get_last_lr()[0]:.2e}"
                 )
 
         avg_loss = epoch_loss / num_batches

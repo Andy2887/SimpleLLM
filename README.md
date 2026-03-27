@@ -82,7 +82,8 @@ python gpt_instruction_finetuning.py --epochs 3 --batch_size 4 --lr 1e-5 --max_l
 
 ## TODO
 
-1. Add activation checkpointing.
+1. Learn Reinforcement Learning.
+2. SFT + RL!!!
 
 ## Acknowledgement
 
