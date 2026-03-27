@@ -38,7 +38,10 @@ def main(config, input_prompt, device, weights_path, tokenizer_path):
 
     print("Loading pretrained weights...")
     params = torch.load(weights_path, map_location="cpu", weights_only=True)
-    load_weights_into_llama(model, config, params)
+    if "tok_embeddings.weight" in params:
+        load_weights_into_llama(model, config, params)
+    else:
+        model.load_state_dict(params)
     del params
 
     print("Moving model to corresponding device...")
