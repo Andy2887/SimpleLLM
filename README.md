@@ -1,6 +1,8 @@
 # SimpleLLM
 
-A Llama-style language model with chain-of-thought reasoning abilities built from scratch in PyTorch.
+A Llama-style reasoning model built from scratch in PyTorch.
+
+I built a language model following Llama 3.2 architecture and loaded Meta's weights into my model. After fine-tuning, the model is capable of chain-of-thought reasoning.
 
 ![Alt text](simple_llm_architecture.svg)
 
