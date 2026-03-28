@@ -105,7 +105,6 @@ def main():
     print(f"Batches per epoch: {steps_per_epoch}")
     print(f"Batch size: {args.batch_size}")
     print(f"Total optimizer steps: {total_steps}")
-    print(f"Checkpoint every {checkpoint_interval} batches (1/10 epoch)")
     print("Starting training...\n")
 
     global_step = 0

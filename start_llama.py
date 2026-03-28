@@ -50,24 +50,42 @@ def main(config, input_prompt, device, weights_path, tokenizer_path):
 
     tokenizer = Tokenizer(tokenizer_path)
 
-    prompt = format_prompt(input_prompt)
+    if input_prompt:
+        prompts = [input_prompt]
+    else:
+        prompts = None
 
-    print("Start generating output...")
+    while True:
+        if prompts:
+            user_input = prompts.pop(0)
+        else:
+            try:
+                user_input = input("\nEnter prompt (or 'exit'/'quit' to stop): ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nExiting.")
+                break
+            if user_input.strip().lower() in ("exit", "quit"):
+                print("Exiting.")
+                break
 
-    token_ids = generate(
-        model=model,
-        idx=text_to_token_ids(prompt, tokenizer).to(device),
-        max_new_tokens=1024,
-        context_size=config["context_length"],
-        top_k=10,
-        temperature=0.3,
-        eos_id=tokenizer.special["<|eot_id|>"]
-    )
+        prompt = format_prompt(user_input)
 
-    prompt_len = text_to_token_ids(prompt, tokenizer).shape[1]
-    output_text = token_ids_to_text(token_ids[:, prompt_len:], tokenizer)
+        print("Start generating output...")
 
-    print("Output text:\n", output_text)
+        token_ids = generate(
+            model=model,
+            idx=text_to_token_ids(prompt, tokenizer).to(device),
+            max_new_tokens=1024,
+            context_size=config["context_length"],
+            top_k=10,
+            temperature=0.3,
+            eos_id=tokenizer.special["<|eot_id|>"]
+        )
+
+        prompt_len = text_to_token_ids(prompt, tokenizer).shape[1]
+        output_text = token_ids_to_text(token_ids[:, prompt_len:], tokenizer)
+
+        print(f"Output text:\n{output_text}")
 
 
 if __name__ == "__main__":
@@ -83,8 +101,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--prompt",
-        default="Every effort",
-        help="Prompt for text generation."
+        default=None,
+        help="Initial prompt for text generation. If omitted, starts in interactive mode."
     )
     parser.add_argument(
         "--device",
