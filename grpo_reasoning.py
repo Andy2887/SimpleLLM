@@ -226,35 +226,6 @@ def main():
             s["gen_len"] for s in stats["samples"]
         ) / len(stats["samples"])
 
-        # Check if all rewards identical
-        rewards_tensor = torch.tensor(stats["rewards"])
-        if rewards_tensor.std() < 1e-8:
-            print(
-                f"Step {step+1}/{total_steps} | "
-                f"Loss: skipped (uniform rewards) | "
-                f"Reward: {reward_avg:.4f} | "
-                f"Avg len: {avg_response_len:.1f}"
-            )
-            metrics_writer.writerow([step + 1, "N/A", f"{reward_avg:.4f}", f"{avg_response_len:.1f}"])
-            metrics_file.flush()
-
-            if (step + 1) % 5 == 0:
-                elapsed = time.time() - timer_start
-                avg_step_time = elapsed / 5
-                remaining = avg_step_time * (total_steps - step - 1)
-                rem_min, rem_sec = divmod(int(remaining), 60)
-                rem_hr, rem_min = divmod(rem_min, 60)
-                print(
-                    f"  [Timer] Last 5 steps: {elapsed:.1f}s | "
-                    f"ETA: {rem_hr:02d}:{rem_min:02d}:{rem_sec:02d}"
-                )
-                prompt_text = tokenizer.decode(prompt_tokens)
-                print(f"  [Sample] Q: ...{prompt_text[-150:]}")
-                print(f"  [Sample] A: {stats['samples'][0]['text']}")
-                print()
-                timer_start = time.time()
-            continue
-
         stats["loss_tensor"].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         optimizer.step()
