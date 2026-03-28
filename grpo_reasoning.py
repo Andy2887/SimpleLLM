@@ -57,6 +57,8 @@ def main():
     print("Preparing RL data...")
     tokenizer = Tokenizer(args.tokenizer)
     rl_data = load_and_process_rl_data(tokenizer, max_seq_len=args.max_gen_len)
+    if len(rl_data) > 1000:
+        rl_data = rl_data[:1000]
     print(f"RL dataset size: {len(rl_data)} questions")
 
     print("Loading model...")
