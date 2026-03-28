@@ -179,9 +179,8 @@ def main():
             log_probs = torch.log_softmax(response_logits.float(), dim=-1)
             token_log_probs = log_probs.gather(1, response_ids.unsqueeze(1)).squeeze(1)
 
-            # GRPO loss: -advantage * sequence log prob, averaged over rollouts
-            # Using sum (not mean) so shorter correct answers get larger gradients
-            rollout_loss = -advantages[i] * token_log_probs.sum()
+            # GRPO loss
+            rollout_loss = -advantages[i] * token_log_probs.mean()
             (rollout_loss / args.num_rollouts).backward()
             total_loss += rollout_loss.item() / args.num_rollouts
 
