@@ -1,5 +1,6 @@
 import os
 import csv
+import re
 import argparse
 import time
 import torch
@@ -7,7 +8,35 @@ import torch
 from llama import Llama3Model, Tokenizer, LLAMA32_CONFIG_1B
 from data_prep.prepare_cot_data import load_and_process_rl_data
 from utils import generate
-from rewards import correctness_reward
+
+
+def correctness_reward(response_text, ground_truth):
+    """
+    +1 if <answer>...</answer> contains the ground truth (string containment
+    or numerical equivalence), 0 otherwise.
+    """
+    match = re.search(r'<answer>(.*?)</answer>', response_text, re.DOTALL)
+    if match is None:
+        return 0.0
+
+    answer_content = match.group(1).strip()
+    gt = ground_truth.strip()
+
+    # String containment (e.g. "Andy's age is 15" matches ground truth "15")
+    if gt in answer_content:
+        return 1.0
+
+    # Numerical equivalence (e.g. "15.0" matches "15")
+    try:
+        gt_num = float(gt)
+        numbers = re.findall(r'-?\d+\.?\d*', answer_content)
+        for num_str in numbers:
+            if float(num_str) == gt_num:
+                return 1.0
+    except ValueError:
+        pass
+
+    return 0.0
 
 GRPO_CONFIG = {
     "num_rollouts": 4,
@@ -17,6 +46,84 @@ GRPO_CONFIG = {
     "grad_clip": 1.0,
     "weight_decay": 0.1,
 }
+
+def sequence_logprob(model, token_ids, prompt_len):
+    logits = model(token_ids.unsqueeze(0)).squeeze(0).float()
+    logprobs = torch.log_softmax(logits, dim=-1)
+    selected = logprobs[:-1].gather(
+        1, token_ids[1:].unsqueeze(-1)
+    ).squeeze(-1)
+    return torch.sum(selected[prompt_len - 1:])
+
+def compute_grpo_loss(
+    model,
+    tokenizer,
+    prompt_tokens,
+    ground_truth,
+    device,
+    config,
+    num_rollouts=4,
+    max_gen_len=1024,
+    temperature=0.7,
+):
+    eot_id = tokenizer.special["<|eot_id|>"]
+    prompt_tensor = torch.tensor([prompt_tokens], device=device)
+    prompt_len = len(prompt_tokens)
+
+    roll_logps, roll_rewards, samples = [], [], []
+
+    was_training = model.training
+    model.eval()
+
+    # generate rollouts
+    for _ in range(num_rollouts):
+        # Stage 1: generate rollout
+        with torch.no_grad():
+            full_seq = generate(
+                model=model,
+                idx=prompt_tensor.clone(),
+                max_new_tokens=max_gen_len,
+                context_size=config["context_length"],
+                temperature=temperature,
+                eos_id=eot_id,
+                use_cache=True,
+            )
+        token_ids = full_seq[0]
+        response_ids = token_ids[prompt_len:]
+        text = tokenizer.decode(response_ids.tolist())
+
+        # Stage 2: compute reward
+        reward = correctness_reward(text, ground_truth)
+        roll_rewards.append(reward)
+
+        # Stage 3: compute logprob
+        logp = sequence_logprob(model, token_ids, prompt_len)
+        roll_logps.append(logp)
+
+        samples.append({
+            "text": text,
+            "reward": reward,
+            "gen_len": len(response_ids),
+        })
+    
+    if was_training:
+        model.train()
+
+    # collect all rewards & compute advantages
+    rewards = torch.tensor(roll_rewards, device=device)
+    advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
+
+    # collect all logprobs & compute policy gradient loss
+    logps = torch.stack(roll_logps)
+    pg_loss = -(advantages.detach() * logps).mean()
+
+    return {
+        "pg_loss": pg_loss.item(),
+        "rewards": roll_rewards,
+        "advantages": advantages.detach().cpu().tolist(),
+        "samples": samples,
+        "loss_tensor": pg_loss,
+    }
 
 
 def main():
@@ -89,7 +196,6 @@ def main():
 
     total_steps = len(rl_data)
     checkpoint_interval = max(1, total_steps // 10)
-    eot_id = tokenizer.special["<|eot_id|>"]
 
     print(f"Total steps (questions): {total_steps}")
     print(f"Num rollouts per question: {args.num_rollouts}")
@@ -100,39 +206,29 @@ def main():
     for step, sample in enumerate(rl_data):
         prompt_tokens = sample["prompt_tokens"]
         ground_truth = sample["answer"]
-        prompt_tensor = torch.tensor([prompt_tokens], device=device)
 
-        # ---- Generation phase (no grad) ----
-        model.eval()
-        completions = []
-        response_texts = []
-        for _ in range(args.num_rollouts):
-            with torch.no_grad():
-                full_seq = generate(
-                    model=model,
-                    idx=prompt_tensor.clone(),
-                    max_new_tokens=args.max_gen_len,
-                    context_size=config["context_length"],
-                    temperature=args.temperature,
-                    eos_id=eot_id,
-                    use_cache=True,
-                )
-            response_ids = full_seq[0, len(prompt_tokens):]
-            completions.append(response_ids)
-            response_texts.append(tokenizer.decode(response_ids.tolist()))
-
-        # ---- Reward phase ----
-        rewards = torch.tensor(
-            [correctness_reward(text, ground_truth) for text in response_texts],
+        # Compute GRPO loss
+        optimizer.zero_grad()
+        stats = compute_grpo_loss(
+            model=model,
+            tokenizer=tokenizer,
+            prompt_tokens=prompt_tokens,
+            ground_truth=ground_truth,
             device=device,
-            dtype=torch.float32,
+            config=config,
+            num_rollouts=args.num_rollouts,
+            max_gen_len=args.max_gen_len,
+            temperature=args.temperature,
         )
-        reward_avg = rewards.mean().item()
-        avg_response_len = sum(len(c) for c in completions) / len(completions)
 
-        # ---- Advantage calculation ----
-        if rewards.std() < 1e-8:
-            # All rewards identical — skip this training step
+        reward_avg = sum(stats["rewards"]) / len(stats["rewards"])
+        avg_response_len = sum(
+            s["gen_len"] for s in stats["samples"]
+        ) / len(stats["samples"])
+
+        # Check if all rewards identical
+        rewards_tensor = torch.tensor(stats["rewards"])
+        if rewards_tensor.std() < 1e-8:
             print(
                 f"Step {step+1}/{total_steps} | "
                 f"Loss: skipped (uniform rewards) | "
@@ -144,62 +240,35 @@ def main():
 
             if (step + 1) % 5 == 0:
                 elapsed = time.time() - timer_start
-                avg_step_time = elapsed / 10
+                avg_step_time = elapsed / 5
                 remaining = avg_step_time * (total_steps - step - 1)
                 rem_min, rem_sec = divmod(int(remaining), 60)
                 rem_hr, rem_min = divmod(rem_min, 60)
                 print(
-                    f"  [Timer] Last 10 steps: {elapsed:.1f}s | "
+                    f"  [Timer] Last 5 steps: {elapsed:.1f}s | "
                     f"ETA: {rem_hr:02d}:{rem_min:02d}:{rem_sec:02d}"
                 )
                 prompt_text = tokenizer.decode(prompt_tokens)
                 print(f"  [Sample] Q: ...{prompt_text[-150:]}")
-                print(f"  [Sample] A: {response_texts[0]}")
+                print(f"  [Sample] A: {stats['samples'][0]['text']}")
                 print()
                 timer_start = time.time()
             continue
 
-        advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
-
-        # ---- Training phase ----
-        model.train()
-        optimizer.zero_grad()
-
-        total_loss = 0.0
-        for i in range(args.num_rollouts):
-            response_ids = completions[i]
-            if len(response_ids) == 0:
-                continue
-
-            full_ids = torch.cat([prompt_tensor[0], response_ids]).unsqueeze(0)
-            logits = model(full_ids)
-
-            # Log probs for response tokens only
-            # logits[t] predicts token[t+1], so logits[prompt_len-1:-1] predicts response tokens
-            prompt_len = len(prompt_tokens)
-            response_logits = logits[0, prompt_len - 1 : -1, :]
-            log_probs = torch.log_softmax(response_logits.float(), dim=-1)
-            token_log_probs = log_probs.gather(1, response_ids.unsqueeze(1)).squeeze(1)
-
-            # GRPO loss
-            rollout_loss = -advantages[i] * token_log_probs.mean()
-            (rollout_loss / args.num_rollouts).backward()
-            total_loss += rollout_loss.item() / args.num_rollouts
-
+        stats["loss_tensor"].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         optimizer.step()
 
-        # ---- Logging (every step) ----
         print(
             f"Step {step+1}/{total_steps} | "
-            f"Loss: {total_loss:.6f} | "
+            f"Loss: {stats['pg_loss']:.6f} | "
             f"Reward: {reward_avg:.4f} | "
             f"Avg len: {avg_response_len:.1f}"
         )
-        metrics_writer.writerow([step + 1, f"{total_loss:.6f}", f"{reward_avg:.4f}", f"{avg_response_len:.1f}"])
+        metrics_writer.writerow([step + 1, f"{stats['pg_loss']:.6f}", f"{reward_avg:.4f}", f"{avg_response_len:.1f}"])
         metrics_file.flush()
 
-        # ---- Sample output + timer (every 10 steps) ----
+        # Sample output + timer (every 10 steps)
         if (step + 1) % 10 == 0:
             elapsed = time.time() - timer_start
             avg_step_time = elapsed / 10
@@ -212,13 +281,13 @@ def main():
             )
             prompt_text = tokenizer.decode(prompt_tokens)
             print(f"  [Sample] Q: ...{prompt_text[-150:]}")
-            print(f"  [Sample] A: {response_texts[0][:300]}")
+            print(f"  [Sample] A: {stats['samples'][0]['text'][:300]}")
             print()
             timer_start = time.time()
 
-        # ---- Checkpoint (every 1/10 of total steps) ----
+        # Checkpoint (every 1/10 of total steps) if enabled
         if args.mid_epoch_checkpoints and (step + 1) % checkpoint_interval == 0:
-            ckpt_path = f"checkpoints/fl_reasoning_step{step+1}.pth"
+            ckpt_path = f"checkpoints/rl_reasoning_step{step+1}.pth"
             torch.save(model.state_dict(), ckpt_path)
             print(f"  Saved checkpoint: {ckpt_path}")
 

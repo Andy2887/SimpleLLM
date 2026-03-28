@@ -1,6 +1,6 @@
 # SimpleLLM
 
-A GPT-2-style language model built from scratch in PyTorch.
+A Llama-style language model with chain-of-thought reasoning abilities built from scratch in PyTorch.
 
 ![Alt text](architecture.svg)
 
@@ -8,18 +8,16 @@ A GPT-2-style language model built from scratch in PyTorch.
 
 | File | Description |
 |------|-------------|
-| `start_gpt.py` | Entry point — generates text with SimpleLLM |
-| `gpt.py` | Core model components: `GPTModel`, `TransformerBlock`, `MultiHeadAttention`, data loading |
-| `utils.py` | General utilities: `generate`, `text_to_token_ids`, `token_ids_to_text`, `format_instruction_prompt` |
-| `gpt_download.py` | Downloads GPT-2 pretrained weights from OpenAI and loads them into my model |
-| `gpt_instruction_finetuning.py` | Fine-tunes the model on instruction data |
+| `main.py` | Entry point — generates text with a pretrained Llama model |
+| `llama.py` | Core model components: `Llama3Model`, `TransformerBlock`, `GroupedQueryAttention`, tokenizer, weight loading |
+| `utils.py` | General utilities: `generate`, `text_to_token_ids`, `token_ids_to_text` |
+| `sft_reasoning.py` | Supervised fine-tuning for chain-of-thought reasoning |
+| `grpo_reasoning.py` | GRPO reinforcement learning for math reasoning |
+| `data_prep/prepare_cot_data.py` | Loads CoT dataset from HuggingFace and formats into Llama 3.2 chat template |
+| `data_prep/cot_dataset.py` | PyTorch Dataset class for chain-of-thought fine-tuning |
+| `tests/` | Unit tests for model, utils, and data pipeline |
 
 ## Getting Started
-
-### Prerequisites
-
-- Python 3.10+
-- Dependencies: `torch`, `tiktoken`, `tensorflow`, `numpy`, `requests`, `tqdm`
 
 ### Installation
 
@@ -31,60 +29,51 @@ pip install -r requirements.txt
 
 ### Usage
 
-`llm.py` will download and use the pretrained weights of GPT-2 from OpenAI. 
+First, download the base model weights of Llama 3.2 1B from Meta: [Llama Downloads](https://www.llama.com/llama-downloads/). 
 
-*Note: the pretrained weights files are about 500MB.*
+*Note: the weights files are about 3GB.*
 
-```bash
-# Generate text with the default prompt
-python start_gpt.py
-
-# Custom prompt
-python start_gpt.py --prompt "What is the meaning of life?"
-
-# Use GPU (CUDA or Apple Silicon)
-python start_gpt.py --prompt "Why should we study Computer Science?" --device cuda
-python start_gpt.py --prompt "Why should we study Computer Science?" --device mps
-```
-
-If you want to fine-tune the model, see instructions below.
-
-#### Fine-tuning on instruction data
-
-`gpt_instruction_finetuning.py` performs instruction fine-tuning and generates a `parameters_after_finetuning.pth` weights file:
-
-*Note: the finetuned weights file size is about 700MB.*
+After the weights are downloaded, you could start the program.
 
 ```bash
-# Fine-tune with default settings (2 epochs, batch size 8, lr 5e-5)
-python gpt_instruction_finetuning.py
+# Start the program (automatically uses GPU if available)
+python main.py
 
-# Use GPU
-python gpt_instruction_finetuning.py --device cuda
-python gpt_instruction_finetuning.py --device mps
-
-# Customize training
-python gpt_instruction_finetuning.py --epochs 3 --batch_size 4 --lr 1e-5 --max_length 512
+# Manually select GPU (CUDA or Apple Silicon)
+python main.py --device cuda
+python main.py --device mps
 ```
 
-`llm.py` will use the finetuned weights instead of the OpenAI pretrained weights once available.
+If you want to enable chain-of-thought reasoning, you need to fine-tune the model, see instructions below.
 
-## Model Configuration
+#### Fine-tuning on chain-of-thought data
 
-| Parameter | Value |
-|-----------|-------|
-| Vocabulary size | 50,257 |
-| Context length | 1,024 tokens |
-| Embedding dimension | 768 |
-| Transformer layers | 12 |
-| Attention heads | 12 |
-| Total parameters | ~124M |
+`sft_reasoning.py` performs supervised fine-tuning using chain-of-thought data and generates a `checkpoints/sft_reasoning_final.pth` weights file:
+
+*Note: the finetuned weights file size is about 3GB.*
+
+```bash
+# Fine-tune with default settings
+# Check sft_reasoning.py file for how to custom fine-tuning settings
+python sft_reasoning.py
+```
+
+`main.py` will use the finetuned weights instead of the Meta base model weights once available.
+
+## Example Output
+
+![Alt text](example.jpg)
 
 ## TODO
 
-1. Learn Reinforcement Learning.
-2. SFT + RL!!!
+1. Apply GRPO reinforcement learning using GSM8k dataset.
+
+Goals:
+- Enable math reasoning
+- Encourage the model to use concise answers compared to long ones.
+
+2. Create a benchmark to test model's ability to solve logical problems and math problems using LogiQA and GSM8k dataset.
 
 ## Acknowledgement
 
-My project follows Sebastian Raschka's tutorial: [LLMs-from-scratch](https://github.com/rasbt/LLMs-from-scratch).
+I learned from Sebastian Raschka's tutorial: [LLMs-from-scratch](https://github.com/rasbt/LLMs-from-scratch) and [reasoning-from-scratch](https://github.com/rasbt/reasoning-from-scratch).

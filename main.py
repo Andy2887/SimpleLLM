@@ -1,6 +1,7 @@
 from llama import *
 from utils import *
 import argparse
+import sys
 
 MODEL_CONFIGS = {
     "1B": {
@@ -36,7 +37,7 @@ def main(config, input_prompt, device, weights_path, tokenizer_path):
     print("Loading model...")
     model = Llama3Model(config)
 
-    print("Loading pretrained weights...")
+    print(f"Loading weights from {weights_path} ...")
     params = torch.load(weights_path, map_location="cpu", weights_only=True)
     if "tok_embeddings.weight" in params:
         load_weights_into_llama(model, config, params)
@@ -124,8 +125,17 @@ if __name__ == "__main__":
 
     model_info = MODEL_CONFIGS[args.model]
     config = model_info["config"]
-    weights_path = args.weights or model_info["weights"]
     tokenizer_path = args.tokenizer or model_info["tokenizer"]
+
+    if args.weights:
+        weights_path = args.weights
+    elif os.path.exists("checkpoints/rl_reasoning_final.pth"):
+        weights_path = "checkpoints/rl_reasoning_final.pth"
+    elif os.path.exists("checkpoints/sft_reasoning_final.pth"):
+        weights_path = "checkpoints/sft_reasoning_final.pth"
+    else:
+        print("Error: No pretrained weights found. Please provide a weights file via --weights or place weights in the checkpoints/ directory.")
+        sys.exit(1)
 
     if args.device == "auto":
         if torch.cuda.is_available():
