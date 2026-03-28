@@ -2,7 +2,7 @@
 
 A Llama-style language model with chain-of-thought reasoning abilities built from scratch in PyTorch.
 
-![Alt text](architecture.svg)
+![Alt text](simple_llm_architecture.svg)
 
 ## Project Structure
 
