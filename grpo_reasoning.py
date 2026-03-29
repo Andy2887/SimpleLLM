@@ -39,10 +39,10 @@ def correctness_reward(response_text, ground_truth):
     return 0.0
 
 GRPO_CONFIG = {
-    "num_rollouts": 4,
-    "learning_rate": 1e-6,
+    "num_rollouts": 8,
+    "learning_rate": 1e-5,
     "max_gen_len": 1024,
-    "temperature": 0.7,
+    "temperature": 1.0,
     "grad_clip": 1.0,
     "weight_decay": 0.1,
 }
@@ -164,8 +164,8 @@ def main():
     print("Preparing RL data...")
     tokenizer = Tokenizer(args.tokenizer)
     rl_data = load_and_process_rl_data(tokenizer, max_seq_len=args.max_gen_len)
-    if len(rl_data) > 1000:
-        rl_data = rl_data[:1000]
+    if len(rl_data) > 2000:
+        rl_data = rl_data[:2000]
     print(f"RL dataset size: {len(rl_data)} questions")
 
     print("Loading model...")
