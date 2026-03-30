@@ -139,6 +139,8 @@ def main():
                         help="Disable gradient checkpointing (enabled by default)")
     parser.add_argument("--mid_epoch_checkpoints", action="store_true",
                         help="Save checkpoints every 1/10 of total steps")
+    parser.add_argument("--start_from", type=int, default=0,
+                        help="Sample index to start from (e.g. 20 means process indices 20..N-1)")
     parser.add_argument(
         "--weights",
         default="checkpoints/sft_reasoning_final.pth",
@@ -166,6 +168,9 @@ def main():
     rl_data = load_and_process_rl_data(tokenizer, max_seq_len=args.max_gen_len)
     if len(rl_data) > 2000:
         rl_data = rl_data[:2000]
+    if args.start_from > 0:
+        rl_data = rl_data[args.start_from:]
+        print(f"Starting from sample index {args.start_from}")
     print(f"RL dataset size: {len(rl_data)} questions")
 
     print("Loading model...")
@@ -202,6 +207,7 @@ def main():
     print("Starting GRPO training...\n")
 
     timer_start = time.time()
+    prev_ckpt_path = None
 
     for step, sample in enumerate(rl_data):
         prompt_tokens = sample["prompt_tokens"]
@@ -259,9 +265,17 @@ def main():
         # Checkpoint (every 1/10 of total steps) if enabled
         if args.mid_epoch_checkpoints and (step + 1) % checkpoint_interval == 0:
             ckpt_path = f"checkpoints/rl_reasoning_step{step+1}.pth"
+            if prev_ckpt_path and os.path.exists(prev_ckpt_path):
+                os.remove(prev_ckpt_path)
+                print(f"  Deleted previous checkpoint: {prev_ckpt_path}")
             torch.save(model.state_dict(), ckpt_path)
+            prev_ckpt_path = ckpt_path
             print(f"  Saved checkpoint: {ckpt_path}")
 
+    # Delete last mid-epoch checkpoint before saving final
+    if prev_ckpt_path and os.path.exists(prev_ckpt_path):
+        os.remove(prev_ckpt_path)
+        print(f"Deleted previous checkpoint: {prev_ckpt_path}")
     ckpt_path = "checkpoints/rl_reasoning_final.pth"
     torch.save(model.state_dict(), ckpt_path)
     print(f"\nSaved final checkpoint: {ckpt_path}")
