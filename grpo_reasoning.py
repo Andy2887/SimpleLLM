@@ -11,10 +11,6 @@ from utils import generate
 
 
 def correctness_reward(response_text, ground_truth):
-    """
-    +1 if <answer>...</answer> contains the ground truth (string containment
-    or numerical equivalence), 0 otherwise.
-    """
     match = re.search(r'<answer>(.*?)</answer>', response_text, re.DOTALL)
     if match is None:
         return 0.0
@@ -47,13 +43,32 @@ GRPO_CONFIG = {
     "weight_decay": 0.1,
 }
 
-def sequence_logprob(model, token_ids, prompt_len):
+def sequence_logprob_and_entropy(model, token_ids, prompt_len):
     logits = model(token_ids.unsqueeze(0)).squeeze(0).float()
     logprobs = torch.log_softmax(logits, dim=-1)
-    selected = logprobs[:-1].gather(
-        1, token_ids[1:].unsqueeze(-1)
-    ).squeeze(-1)
-    return torch.sum(selected[prompt_len - 1:])
+
+    targets = token_ids[1:]
+    selected = logprobs[:-1].gather(1, targets.unsqueeze(-1)).squeeze(-1)
+
+    # Log-prob of the generated answer tokens (sum over answer steps)
+    selected_answer_logprobs = selected[prompt_len - 1:]
+    logp_all_steps = torch.sum(selected_answer_logprobs)
+
+    # Calculate entropy
+    # As a rule of thumb:
+    # Very low entropy (≈ 0–0.5) means one token dominates the distribution, where the model is highly confident and behaves almost deterministically
+    # Moderate entropy (≈ 1–2) means that the probability mass is shared among a few more tokens, which is typical during stable training
+    # High entropy (≫ 2, approaching log(vocabulary_size); here: log(128256) = 5.1), the probability mass is spread across many tokens, and the model is highly uncertain and behaves close to random
+    all_answer_logprobs = logprobs[:-1][prompt_len - 1:]
+    if all_answer_logprobs.numel() == 0:  # Safeguard if the model immediately returns EOS token
+        entropy_all_steps = logp_all_steps.new_tensor(0.0)
+    else:
+        all_answer_probs = torch.exp(all_answer_logprobs)  # convert logprob to prob
+        plogp = all_answer_probs * all_answer_logprobs     # elementwise p * log p
+        step_entropy = -torch.sum(plogp, dim=-1)           # sum over vocab -> entropy per step
+        entropy_all_steps = torch.mean(step_entropy)       # average over answer steps
+
+    return logp_all_steps, entropy_all_steps
 
 def compute_grpo_loss(
     model,
@@ -70,7 +85,7 @@ def compute_grpo_loss(
     prompt_tensor = torch.tensor([prompt_tokens], device=device)
     prompt_len = len(prompt_tokens)
 
-    roll_logps, roll_rewards, samples = [], [], []
+    roll_logps, roll_rewards, roll_entropies, samples = [], [], [], []
 
     was_training = model.training
     model.eval()
@@ -96,9 +111,10 @@ def compute_grpo_loss(
         reward = correctness_reward(text, ground_truth)
         roll_rewards.append(reward)
 
-        # Stage 3: compute logprob
-        logp = sequence_logprob(model, token_ids, prompt_len)
+        # Stage 3: compute logprob and entropy
+        logp, entropy = sequence_logprob_and_entropy(model, token_ids, prompt_len)
         roll_logps.append(logp)
+        roll_entropies.append(entropy.item())
 
         samples.append({
             "text": text,
@@ -121,6 +137,7 @@ def compute_grpo_loss(
         "pg_loss": pg_loss.item(),
         "rewards": roll_rewards,
         "advantages": advantages.detach().cpu().tolist(),
+        "entropies": roll_entropies,
         "samples": samples,
         "loss_tensor": pg_loss,
     }
@@ -138,7 +155,9 @@ def main():
     parser.add_argument("--no_gradient_checkpointing", action="store_true",
                         help="Disable gradient checkpointing (enabled by default)")
     parser.add_argument("--mid_epoch_checkpoints", action="store_true",
-                        help="Save checkpoints every 1/10 of total steps")
+                        help="Save checkpoints every 100 steps")
+    parser.add_argument("--num_steps", type=int, default=None,
+                        help="Number of steps (samples) to run (e.g. 100 means indices 0..99)")
     parser.add_argument("--start_from", type=int, default=0,
                         help="Sample index to start from (e.g. 20 means process indices 20..N-1)")
     parser.add_argument(
@@ -171,6 +190,9 @@ def main():
     if args.start_from > 0:
         rl_data = rl_data[args.start_from:]
         print(f"Starting from sample index {args.start_from}")
+    if args.num_steps is not None:
+        rl_data = rl_data[:args.num_steps]
+        print(f"Limiting to {args.num_steps} steps")
     print(f"RL dataset size: {len(rl_data)} questions")
 
     print("Loading model...")
@@ -197,10 +219,10 @@ def main():
     os.makedirs("metrics", exist_ok=True)
     metrics_file = open("metrics/rl_metrics.csv", "w", newline="")
     metrics_writer = csv.writer(metrics_file)
-    metrics_writer.writerow(["Step", "Loss", "Reward_Avg", "Avg_Response_Len"])
+    metrics_writer.writerow(["Step", "Loss", "Reward_Avg", "Avg_Response_Len", "Adv_Avg", "Adv_Std", "Entropy"])
 
     total_steps = len(rl_data)
-    checkpoint_interval = max(1, total_steps // 10)
+    checkpoint_interval = 100
 
     print(f"Total steps (questions): {total_steps}")
     print(f"Num rollouts per question: {args.num_rollouts}")
@@ -231,6 +253,10 @@ def main():
         avg_response_len = sum(
             s["gen_len"] for s in stats["samples"]
         ) / len(stats["samples"])
+        adv = stats["advantages"]
+        adv_avg = sum(adv) / len(adv)
+        adv_std = (sum((a - adv_avg) ** 2 for a in adv) / len(adv)) ** 0.5
+        entropy_avg = sum(stats["entropies"]) / len(stats["entropies"])
 
         stats["loss_tensor"].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -240,9 +266,12 @@ def main():
             f"Step {step+1}/{total_steps} | "
             f"Loss: {stats['pg_loss']:.6f} | "
             f"Reward: {reward_avg:.4f} | "
-            f"Avg len: {avg_response_len:.1f}"
+            f"Avg len: {avg_response_len:.1f} | "
+            f"Adv avg: {adv_avg:.4f} | "
+            f"Adv std: {adv_std:.4f} | "
+            f"Entropy: {entropy_avg:.4f}"
         )
-        metrics_writer.writerow([step + 1, f"{stats['pg_loss']:.6f}", f"{reward_avg:.4f}", f"{avg_response_len:.1f}"])
+        metrics_writer.writerow([step + 1, f"{stats['pg_loss']:.6f}", f"{reward_avg:.4f}", f"{avg_response_len:.1f}", f"{adv_avg:.4f}", f"{adv_std:.4f}", f"{entropy_avg:.4f}"])
         metrics_file.flush()
 
         # Sample output + timer (every 10 steps)
