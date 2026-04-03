@@ -287,7 +287,7 @@ def main():
             )
             prompt_text = tokenizer.decode(prompt_tokens)
             print(f"  [Sample] Q: ...{prompt_text[-150:]}")
-            print(f"  [Sample] A: {stats['samples'][0]['text'][:300]}")
+            print(f"  [Sample] A: {stats['samples'][0]['text']}")
             print()
             timer_start = time.time()
 
